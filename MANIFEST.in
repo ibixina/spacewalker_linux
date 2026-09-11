@@ -1,0 +1,9 @@
+include LICENSE README.md CHANGELOG.md RELEASE.md requirements-tested.txt run.sh
+recursive-include scripts *.sh *.py
+recursive-include packaging *.rules *.svg *.in
+recursive-include tests *.py *.mjs
+recursive-include docs *.md *.json
+prune artifacts
+prune vendor
+prune .venv
+global-exclude __pycache__ *.py[cod] .DS_Store

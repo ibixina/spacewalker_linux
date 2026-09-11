@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Spacewalker Linux
+GenericName=XR Spatial Display
+Comment=Spatial monitors and head-tracked video for VITURE glasses
+Exec=@RUNNER@
+TryExec=@TRY_RUNNER@
+Icon=spacewalker-linux
+Terminal=false
+StartupNotify=true
+StartupWMClass=Spacewalker
+Categories=AudioVideo;Video;
+Keywords=VITURE;XR;VR;spatial;monitor;display;360;
+Actions=SingleScreen;MultipleScreens;
+
+[Desktop Action SingleScreen]
+Name=Single anchored screen
+Exec=@RUNNER@ --mode single
+
+[Desktop Action MultipleScreens]
+Name=Multiple spatial screens
+Exec=@RUNNER@ --mode multiple

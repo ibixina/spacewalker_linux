@@ -1,0 +1,24 @@
+{
+  "before": {
+    "milliseconds_per_1000": [
+      759.824,
+      621.884,
+      614.083,
+      622.585,
+      608.228
+    ],
+    "median_us_per_event": 621.884
+  },
+  "after": {
+    "milliseconds_per_1000": [
+      36.642,
+      38.669,
+      37.257,
+      36.695,
+      37.002
+    ],
+    "median_us_per_event": 37.002
+  },
+  "speedup": 16.81,
+  "scope": "Five unchanged monitor surfaces; pointer hit testing only, not total rendering or motion-to-photon latency."
+}

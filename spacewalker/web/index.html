@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Spacewalker 360</title>
+  <link rel="stylesheet" href="/player.css">
+  <script type="module" src="/player.js"></script>
+</head>
+<body>
+  <header>
+    <strong>Spacewalker <span>360</span></strong>
+    <form id="open-form">
+      <label class="sr-only" for="url">YouTube or direct video link</label>
+      <input id="url" type="url" placeholder="Paste a YouTube 360° or direct video link" required>
+      <button type="submit">Open</button>
+    </form>
+    <span id="tracking" role="status">Connecting tracking…</span>
+  </header>
+  <main id="stage">
+    <div id="empty"><h1>Look around inside the video.</h1>
+      <p>Open a 360° YouTube video or a direct panoramic video link.</p>
+      <p>Keep Spacewalker running. Move this window to the glasses, enter fullscreen, then recenter.</p>
+    </div>
+    <div id="youtube" hidden></div>
+    <canvas id="panorama" hidden></canvas>
+    <div id="overlay">
+      <button id="recenter" title="Set your current head direction as forward">Recenter</button>
+      <label><input id="head-tracking" type="checkbox" checked> Head tracking</label>
+      <label>View <select id="view-preset" aria-label="Video view" title="Wide starts at 90° for video. Glasses scale uses the narrower optical calibration."><option value="wide">Wide</option><option value="natural">Glasses scale</option><option value="custom" disabled>Custom</option></select></label>
+      <label><span class="sr-only">Field of view</span><input id="fov" type="range" min="15" max="90" step="1" value="90"><output id="fov-value">90°</output></label>
+      <button id="glasses">Move to glasses</button>
+      <button id="fullscreen">Fullscreen</button>
+      <button id="controls">App controls</button>
+    </div>
+    <div id="media-controls" hidden>
+      <button id="play">Play</button>
+      <input id="seek" aria-label="Video position" type="range" min="0" max="0" step="0.1" value="0">
+      <label>Volume <input id="volume" type="range" min="0" max="1" step="0.01" value="0.7"></label>
+      <label>Projection <select id="projection"><option value="360">360°</option><option value="180">180°</option></select></label>
+      <label>Video eyes <select id="packing"><option value="mono">Mono</option><option value="sbs">Side by side</option><option value="tb">Top / bottom</option></select></label>
+    </div>
+  </main>
+  <footer>
+    <p id="message" role="status">YouTube links open in the official embedded player. Other links must point directly to a video file.</p>
+    <p id="clarity" class="hint" hidden></p>
+    <p class="hint">Use fullscreen on the physical VITURE display, and normal 2D glasses mode for YouTube.</p>
+  </footer>
+</body>
+</html>

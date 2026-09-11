@@ -38,6 +38,23 @@ def test_recenter_before_first_sample_uses_first_sample():
     np.testing.assert_allclose(state.orientation(), IDENTITY, atol=1e-6)
 
 
+def test_recenter_rejects_stale_samples_and_recovers_on_fresh_data(monkeypatch):
+    from types import SimpleNamespace
+    now = [10.]
+    monkeypatch.setattr('spacewalker.tracking.time',SimpleNamespace(monotonic=lambda:now[0]))
+    state = PoseState()
+    state.push(viture_euler_to_gl(25,32,47))
+    state.push(viture_euler_to_gl(30,40,50))
+    before = state.orientation()
+    now[0] += .51
+    assert state.recenter() is False
+    np.testing.assert_allclose(state.orientation(),before)
+    state.push(viture_euler_to_gl(30,40,50))
+    assert state.recenter() is True
+    np.testing.assert_allclose(state.orientation(),IDENTITY,atol=1e-6)
+    assert state.reference_up == (0.,1.,0.)
+
+
 @pytest.mark.parametrize('recenter_angles',[(0,20,35),(0,-30,-140),(12,25,179)])
 @pytest.mark.parametrize('elevations',[(0,0,0),(-15,12,-1)])
 def test_all_monitors_stay_upright_when_faced_after_pitched_recenter(recenter_angles,elevations):
@@ -49,26 +66,26 @@ def test_all_monitors_stay_upright_when_faced_after_pitched_recenter(recenter_an
     for i,elevation in enumerate(elevations):
         layout.update_panel(i,elevation=elevation)
         center,right,up,normal,_ = layout.panel_frame(i)
-        # Aim a physically level head directly at each world-fixed monitor.
-        forward = matrix(reference) @ (center/np.linalg.norm(center))
+        # Turn within the calibrated frame to face each fixed monitor.
+        forward = center/np.linalg.norm(center)
         yaw = -math.degrees(math.atan2(forward[0],-forward[2]))
         pitch = -math.degrees(math.asin(np.clip(forward[1],-1,1)))
-        state.push(viture_euler_to_gl(0,pitch,yaw))
+        state.push(multiply(reference,viture_euler_to_gl(0,pitch,yaw)))
         view = matrix(state.orientation()).T
         # The middle row stays level when faced, without pitching the monitor
-        # toward the eye. Its vertical edges remain parallel to world gravity.
+        # toward the eye. Its vertical edges remain parallel to calibrated up.
         np.testing.assert_allclose(view @ right,[1,0,0],atol=1e-6)
-        np.testing.assert_allclose(matrix(reference) @ up,[0,1,0],atol=1e-6)
+        np.testing.assert_allclose(up,[0,1,0],atol=1e-6)
         np.testing.assert_allclose(layout.hit(matrix(state.orientation()) @ [0,0,-1]),
                                    [i*1920+960,540],atol=1)
         # Panels remain fixed, rather than following the current head's up axis.
         assert state.reference_up == layout.world_up
-        state.push(viture_euler_to_gl(15,pitch,yaw))
+        state.push(multiply(reference,viture_euler_to_gl(15,pitch,yaw)))
         rolled_right = matrix(state.orientation()).T @ right
         assert math.degrees(math.atan2(rolled_right[1],rolled_right[0])) == pytest.approx(15,abs=1e-5)
 
 
-def test_level_reference_refreshes_on_recenter_without_changing_saved_placement():
+def test_recenter_keeps_the_horizon_level_without_changing_saved_placement():
     state = PoseState()
     layout = Layout()
     layout.update_panel(0,azimuth=-32,elevation=10,distance=3.4,roll=7)
@@ -80,7 +97,7 @@ def test_level_reference_refreshes_on_recenter_without_changing_saved_placement(
     layout.world_up = state.reference_up
     changed = layout.render_arrays()
     np.testing.assert_array_equal(changed[0],original[0])
-    assert not np.array_equal(changed[1],original[1])
+    np.testing.assert_array_equal(changed[1],original[1])
     assert layout.render_arrays() is changed
     state.push(viture_euler_to_gl(0,0,90))
     assert state.reference_up == layout.world_up
@@ -114,7 +131,7 @@ def test_monitor_sides_stay_vertical_while_looking_between_screens(reference_ang
         layout.update_panel(i,azimuth=azimuth,elevation=elevation)
     fixed = layout.render_arrays()
     for heading_offset in (-30,0,23,47):
-        state.push(viture_euler_to_gl(0,0,reference_angles[2]+heading_offset))
+        state.push(multiply(reference,viture_euler_to_gl(0,0,heading_offset)))
         view = matrix(state.orientation()).T
         for i in range(3):
             center,right,up,normal,(hw,hh) = layout.panel_frame(i)

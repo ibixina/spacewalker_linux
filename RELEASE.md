@@ -1,6 +1,6 @@
 # Release procedure
 
-The prepared version is **0.1.0rc1**, a Linux release candidate. The source repository is [ibixina/spacewalker_linux](https://github.com/ibixina/spacewalker_linux). Build artifacts remain local until a release upload is requested. Do not bundle the VITURE SDK.
+The prepared version is **0.1.0rc2**, a Linux release candidate. The source repository is [ibixina/spacewalker_linux](https://github.com/ibixina/spacewalker_linux). Build artifacts remain local until a release upload is requested. Do not bundle the VITURE SDK.
 
 ## Build and validate
 
@@ -22,7 +22,7 @@ Test outside the checkout so source files cannot hide missing package contents:
 
 ```bash
 python3 -m venv /tmp/spacewalker-install
-/tmp/spacewalker-install/bin/python -m pip install dist/spacewalker_linux-0.1.0rc1-py3-none-any.whl
+/tmp/spacewalker-install/bin/python -m pip install dist/spacewalker_linux-0.1.0rc2-py3-none-any.whl
 cd /tmp
 /tmp/spacewalker-install/bin/spacewalker --version
 /tmp/spacewalker-install/bin/spacewalker --doctor
@@ -55,4 +55,4 @@ Before promoting to 0.1.0:
 
 ## Supported scope and limitations
 
-Native monitor integration targets Hyprland. Other compositors can use the explicit private X11 workspace; existing host windows cannot move into that workspace. Tracking supports the current VITURE Gen1/Gen2 SDK, including Pro 2, and is rotational 3DoF. Tracking reconnection is manual. DRM, fisheye, positional tracking, and automatic projection detection are outside this release. Performance reports measure software timing, not physical motion-to-photon latency.
+Native monitor integration targets Hyprland. Other compositors can use the explicit private X11 workspace; existing host windows cannot move into that workspace. Tracking supports the current VITURE Gen1/Gen2 SDK, including Pro 2, and is rotational 3DoF. Stopped tracking reconnects automatically with bounded retry delays; physical unplug/replug still needs acceptance testing. DRM, fisheye, positional tracking, and automatic projection detection are outside this release. Performance reports measure software timing, not physical motion-to-photon latency.

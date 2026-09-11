@@ -128,9 +128,10 @@ class Viewer(QOpenGLWidget):
                 'note':'Software timings only; SDK sensor processing, compositor scanout, and optical latency are not measured.'}
 
     def recenter(self):
+        if self.tracker and self.tracker.pose.recenter() is False:
+            self.problem.emit('Tracking is unavailable. Reconnect tracking before recentering the glasses.')
+            return
         self.yaw = self.pitch = 0.
-        if self.tracker:
-            self.tracker.pose.recenter()
         self.sync_world_up()
         self.update()
         self.recentered.emit()

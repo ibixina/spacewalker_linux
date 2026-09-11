@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0rc2
+
+- Fixed zero-tilt screens remaining skewed after Recenter: calibration now resets the horizon with the camera frame, without rewriting saved screen placement or manual angles.
+- Stale tracking no longer holds the preview at an old head angle. The connection closes and retries in the background with bounded backoff, plus a visible Reconnect action. Manual disconnect cancels retries.
+- Recenter rejects stale tracking instead of reporting success. Diagnostics include sample age, sample count, and recovery state.
+- Tracking recovery reapplies an app-requested SBS mode after reconnecting.
+- Fixed missing dropdown/spinbox icons and verified resource loading from installation paths with spaces.
+- Added rendered geometry, stale calibration, retry cancellation/serialization/backoff, and stereo-recovery regressions. A live Pro 2 stream interruption recovered automatically in approximately 3.8 seconds.
+
 ## 0.1.0rc1
 
 Initial independent Linux release candidate for VITURE spatial monitors and panoramic video.

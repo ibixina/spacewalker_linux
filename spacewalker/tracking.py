@@ -5,7 +5,7 @@ import platform
 from pathlib import Path
 import threading
 import time
-from .geometry import IDENTITY, conjugate, matrix, multiply, normalize, viture_euler_to_gl, slerp
+from .geometry import IDENTITY, conjugate, multiply, normalize, viture_euler_to_gl, slerp
 
 POSE_CALLBACK = C.CFUNCTYPE(None, C.POINTER(C.c_float), C.c_uint64)
 STATE_CALLBACK = C.CFUNCTYPE(None, C.c_int, C.c_int)
@@ -72,14 +72,18 @@ class PoseState:
 
     def recenter(self):
         with self.lock:
+            if self.received and time.monotonic()-self.received >= .5:
+                return False
             self._center_on(self.raw if self.received else None)
             self.filtered = IDENTITY.copy()
+            return True
 
     def _center_on(self, q):
-        # Called with the pose lock held. Keep gravity in the same reference
-        # frame as the recentered pose; its Y axis can be pitched or rolled.
+        # Recenter calibrates the complete camera frame, including its horizon.
+        # Reapplying the inverse pose to monitor up would bake the glasses'
+        # previous pitch/roll into every zero-tilt screen after recentering.
         self.center = conjugate(q) if q is not None else None
-        self._reference_up = tuple(float(v) for v in matrix(self.center)[:,1]) if q is not None else (0., 1., 0.)
+        self._reference_up = (0., 1., 0.)
 
     @property
     def reference_up(self):

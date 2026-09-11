@@ -122,6 +122,197 @@ def until(app,condition,timeout=8):
     raise AssertionError('Condition did not become true within timeout')
 
 
+@pytest.mark.parametrize('stereo',[False,True])
+def test_stalled_tracking_levels_preview_and_reconnects_after_cleanup(app,monkeypatch,stereo):
+    import numpy as np
+    import threading
+    from types import SimpleNamespace
+    from spacewalker.__main__ import parser
+    from spacewalker.app import MainWindow
+    from spacewalker.geometry import Layout,viture_euler_to_gl
+    from spacewalker.tracking import PoseState
+    now = [100.]
+    monkeypatch.setattr('spacewalker.app.time',SimpleNamespace(monotonic=lambda:now[0]))
+    trackers = []
+    closing = threading.Event()
+    release = threading.Event()
+    class Tracker:
+        def __init__(self,*args):
+            assert not trackers or trackers[-1].closed
+            self.pose = PoseState()
+            self.closed = False
+            self.original_display_mode = None
+            trackers.append(self)
+        def start(self): self.pose.push(viture_euler_to_gl(25,32,47))
+        def set_stereo(self,enabled):
+            self.original_display_mode = 0x34 if enabled else None
+        def close(self):
+            if self is trackers[0]:
+                closing.set()
+                assert release.wait(5)
+            self.closed = True
+    monkeypatch.setattr('spacewalker.app.VitureTracker',Tracker)
+    w = MainWindow(parser().parse_args(['--demo','--no-desktop']),Layout(2))
+    w.status_timer.stop()
+    w.show()
+    try:
+        w.connect_tracking()
+        until(app,lambda:w.tracker and not w.jobs)
+        first = w.tracker
+        if stereo:
+            w.set_hardware_stereo(True)
+            until(app,lambda:not w.jobs)
+            assert w.sbs.isChecked()
+        first.pose.push(viture_euler_to_gl(55,40,50))
+        w.viewer.read_orientation()
+        assert not np.allclose(w.viewer.rotation,np.eye(3))
+        # Simulate the reported stream stall after a rolled head pose.
+        first.pose.received = time.monotonic()-2
+        now[0] += 2
+        w.update_status()
+        until(app,closing.is_set)
+        assert w.tracker is None and w.viewer.tracker is None
+        w.viewer.read_orientation()
+        np.testing.assert_allclose(w.viewer.rotation,np.eye(3))
+        w.recenter()
+        assert 'reconnecting' in w.message.text()
+        assert w.reconnect_button.isVisible()
+        now[0] += 10
+        w.update_status()
+        assert len(trackers) == 1  # No new SDK handle while cleanup is running.
+        release.set()
+        until(app,lambda:not w.jobs)
+        w.update_status()
+        assert len(trackers) == 1  # Backoff starts after cleanup finishes.
+        now[0] += 1
+        w.update_status()
+        until(app,lambda:w.tracker and not w.jobs)
+        assert w.tracker is trackers[1]
+        assert w.sbs.isChecked() == stereo
+        assert (w.tracker.original_display_mode is not None) == stereo
+        w.update_status()
+        assert w.tracking_status.text() == 'Tracking · Preview'
+        assert not w.reconnect_button.isVisible()
+        w.viewer.read_orientation()
+        np.testing.assert_allclose(w.viewer.rotation,np.eye(3),atol=1e-6)
+        assert w.layout.world_up == (0.,1.,0.)
+        if stereo:
+            # Restoring 2D after recovery must also change future reconnects.
+            w.set_hardware_stereo(False)
+            until(app,lambda:not w.jobs)
+            w.reconnect_tracking()
+            until(app,lambda:not w.jobs)
+            now[0] += 1
+            w.update_status()
+            until(app,lambda:w.tracker and not w.jobs)
+            assert w.tracker.original_display_mode is None
+            assert not w.sbs.isChecked()
+        w.disconnect_tracking()
+        until(app,lambda:not w.jobs)
+        now[0] += 60
+        w.update_status()
+        assert len(trackers) == (3 if stereo else 2) and not w.tracking_wanted
+        assert not w.reconnect_stereo and not w.sbs.isChecked()
+    finally:
+        release.set()
+        w.close()
+        until(app,lambda:not w.jobs)
+
+
+def test_tracking_retry_backoff_is_bounded_and_manual_disconnect_cancels(app,monkeypatch):
+    from types import SimpleNamespace
+    from spacewalker.__main__ import parser
+    from spacewalker.app import MainWindow
+    from spacewalker.geometry import Layout
+    now,attempts = [100.],[]
+    monkeypatch.setattr('spacewalker.app.time',SimpleNamespace(monotonic=lambda:now[0]))
+    def unavailable(*args):
+        attempts.append(now[0])
+        raise RuntimeError('Test device unavailable')
+    monkeypatch.setattr('spacewalker.app.VitureTracker',unavailable)
+    w = MainWindow(parser().parse_args(['--demo','--no-desktop']),Layout())
+    w.status_timer.stop()
+    try:
+        w.connect_tracking()
+        until(app,lambda:not w.jobs)
+        for delay in (1,2,4,8,16,30,30):
+            previous = len(attempts)
+            now[0] += delay-.01
+            w.update_status()
+            assert len(attempts) == previous
+            now[0] += .01
+            w.update_status()
+            until(app,lambda:not w.jobs)
+            assert len(attempts) == previous+1
+        w.disconnect_tracking()
+        previous = len(attempts)
+        now[0] += 60
+        w.update_status()
+        assert not w.tracking_wanted and len(attempts) == previous
+    finally:
+        w.close()
+
+
+@pytest.mark.parametrize('fails',[False,True])
+def test_disconnect_during_tracking_startup_cancels_retries(app,monkeypatch,fails):
+    import threading
+    from spacewalker.__main__ import parser
+    from spacewalker.app import MainWindow
+    from spacewalker.geometry import Layout,IDENTITY
+    from spacewalker.tracking import PoseState
+    started,release,closed = threading.Event(),threading.Event(),threading.Event()
+    class Tracker:
+        def __init__(self,*args): self.pose = PoseState()
+        def start(self):
+            started.set()
+            assert release.wait(5)
+            if fails: raise RuntimeError('Test startup failed')
+            self.pose.push(IDENTITY)
+        def close(self): closed.set()
+    monkeypatch.setattr('spacewalker.app.VitureTracker',Tracker)
+    w = MainWindow(parser().parse_args(['--demo','--no-desktop']),Layout())
+    w.status_timer.stop()
+    try:
+        w.connect_tracking()
+        until(app,started.is_set)
+        w.disconnect_tracking()
+        release.set()
+        until(app,lambda:not w.jobs)
+        w.update_status()
+        assert closed.is_set() and w.tracker is None
+        assert not w.tracking_wanted and not w.tracking_busy
+        assert w.tracking_status.text() == 'Mouse preview'
+        assert w.reconnect_button.isHidden()
+    finally:
+        release.set()
+        w.close()
+        until(app,lambda:not w.jobs)
+
+
+def test_control_icons_load_from_a_package_path_with_spaces(app,tmp_path,monkeypatch):
+    from PySide6.QtCore import qInstallMessageHandler
+    from spacewalker.__main__ import parser
+    from spacewalker import app as app_module
+    from spacewalker.geometry import Layout
+    package = tmp_path/'Space walker'/'spacewalker'
+    package.mkdir(parents=True)
+    shutil.copytree(Path(app_module.__file__).with_name('icons'),package/'icons')
+    monkeypatch.setattr(app_module,'__file__',str(package/'app.py'))
+    messages = []
+    previous = qInstallMessageHandler(lambda kind,context,message:messages.append(message))
+    w = None
+    try:
+        w = app_module.MainWindow(parser().parse_args(['--demo','--no-desktop']),Layout())
+        w.show()
+        w.toggle_controls()
+        app.processEvents()
+        w.grab()
+        assert not [m for m in messages if 'Cannot open file' in m or 'Could not parse' in m]
+    finally:
+        if w: w.close()
+        qInstallMessageHandler(previous)
+
+
 def test_browser_tracking_recenter_and_return_to_native(app,monkeypatch):
     import http.client
     import json
@@ -728,7 +919,7 @@ def test_rendered_side_monitors_are_level_after_pitched_recenter(app):
     import numpy as np
     from types import SimpleNamespace
     from PySide6.QtCore import QPointF
-    from spacewalker.geometry import Layout,matrix,viture_euler_to_gl
+    from spacewalker.geometry import Layout,multiply,viture_euler_to_gl
     from spacewalker.renderer import Viewer
     from spacewalker.tracking import PoseState
     pixels = np.zeros((360,640*3,4),dtype=np.uint8)
@@ -758,10 +949,10 @@ def test_rendered_side_monitors_are_level_after_pitched_recenter(app):
             assert viewer.layout.to_dict() == saved
             for i in range(3):
                 center = viewer.layout.placement(i).center
-                forward = matrix(reference) @ (center/np.linalg.norm(center))
+                forward = center/np.linalg.norm(center)
                 yaw = -math.degrees(math.atan2(forward[0],-forward[2]))
                 pitch = -math.degrees(math.asin(np.clip(forward[1],-1,1)))
-                pose.push(viture_euler_to_gl(0,pitch,yaw))
+                pose.push(multiply(reference,viture_euler_to_gl(0,pitch,yaw)))
                 shot = viewer.grabFramebuffer()
                 stripe_rows = []
                 for x in (300,500):
@@ -783,7 +974,7 @@ def test_rendered_monitors_have_parallel_vertical_sides_between_screens(app,ster
     import numpy as np
     from types import SimpleNamespace
     from PySide6.QtCore import QPointF
-    from spacewalker.geometry import Layout,viture_euler_to_gl
+    from spacewalker.geometry import Layout,multiply,viture_euler_to_gl
     from spacewalker.renderer import Viewer
     from spacewalker.tracking import PoseState
     pixels = np.full((360,640*3,4),50,dtype=np.uint8)
@@ -805,7 +996,8 @@ def test_rendered_monitors_have_parallel_vertical_sides_between_screens(app,ster
     viewer = Viewer(layout)
     viewer.desktop = StripedDesktop()
     pose = PoseState()
-    pose.push(viture_euler_to_gl(0,20,35))
+    reference = viture_euler_to_gl(0,20,35)
+    pose.push(reference)
     viewer.tracker = SimpleNamespace(pose=pose)
     viewer.mouse_look = False
     viewer.stereo = stereo
@@ -816,7 +1008,7 @@ def test_rendered_monitors_have_parallel_vertical_sides_between_screens(app,ster
     try:
         until(app,lambda: viewer.has_source)
         # Level head looking between two monitors, not directly at either one.
-        pose.push(viture_euler_to_gl(0,0,25))
+        pose.push(multiply(reference,viture_euler_to_gl(0,0,-10)))
         shot = viewer.grabFramebuffer()
         image = shot.convertToFormat(shot.Format.Format_RGBA8888)
         rgb = np.frombuffer(image.constBits(),dtype=np.uint8).reshape(height,-1,4)[:,:,:3]

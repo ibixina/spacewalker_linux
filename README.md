@@ -1,6 +1,6 @@
 # Spacewalker Linux
 
-An independent native Linux spatial desktop and VR video viewer for VITURE glasses. **0.1.0rc1 is a release candidate**, not VITURE's proprietary SpaceWalker app or a product affiliated with VITURE. See [release evaluation](docs/RELEASE_EVALUATION.md), [changes](CHANGELOG.md), and [release verification](RELEASE.md).
+An independent native Linux spatial desktop and VR video viewer for VITURE glasses. **0.1.0rc2 is a release candidate**, not VITURE's proprietary SpaceWalker app or a product affiliated with VITURE. See [release evaluation](docs/RELEASE_EVALUATION.md), [changes](CHANGELOG.md), and [release verification](RELEASE.md).
 
 ## Quick start
 
@@ -26,7 +26,7 @@ The normal window has a compact toolbar; **Settings** opens a drawer. Glasses vi
 
 Use your desktop's display settings to extend onto the glasses. Mirroring the laptop display limits placement and stereo output. The glasses must be connected through a cable/adapter that carries both video and USB data.
 
-**Pro 2 supports rotation tracking (3DoF).** The screens stay anchored as you rotate your head, including pitch and roll. Translating your head through the room is not tracked. There is no camera-based room mapping or persistent physical room anchor. Recenter corrects the facing direction and accumulated drift.
+**Pro 2 supports rotation tracking (3DoF).** The screens stay anchored as you rotate your head, including pitch and roll. Translating your head through the room is not tracked. There is no camera-based room mapping or persistent physical room anchor. Recenter makes your current orientation the forward direction and level horizon. Wear the glasses and look comfortably forward when recentering.
 
 ## One anchored screen
 
@@ -55,7 +55,7 @@ Click **Arrange** in the toolbar. Each display has its own position and orientat
 
 - **Drag a display in the view** to move it left, right, up, or down. Hold it and turn your head to carry it around you. Scroll to bring the selected display closer or farther away; **Shift+scroll** changes its size.
 - **Drag a numbered display on the overhead map** to place it around, beside, or behind you. Select its number to reach displays outside your current view.
-- Adjust **Left / right**, **Up / down**, **Distance**, and **Size** for precise placement. Expand **Screen angle** to turn, tilt, or rotate the monitor. At zero tilt and rotation, every monitor stands vertical, with its sides parallel to gravity. It turns left/right toward your seated position but does not automatically lean when raised or lowered, including after recentering while looking up or down. Use **Tilt** explicitly to lean a screen toward you. Your manual screen angles are applied on top of that upright orientation.
+- Adjust **Left / right**, **Up / down**, **Distance**, and **Size** for precise placement. Expand **Screen angle** to turn, tilt, or rotate the monitor. At zero tilt and rotation, every monitor stands vertical in your recentered frame. Recenter resets the horizon as well as the facing direction, so an earlier tilted calibration cannot leave the screens leaning. A monitor turns left/right toward your seated position but does not automatically lean when raised or lowered. Use **Tilt** explicitly to lean a screen toward you. Your manual screen angles are applied on top of that upright orientation.
 - Each position, size, and angle control has a slider that updates the display continuously while you drag. The numeric value stays in sync and supports precise entry. **Done** saves the changes; **Cancel** restores the previous arrangement.
 - **Place where I’m looking** brings the selected display into your current gaze without changing its distance or size.
 - **Choose a layout…** starts an arc around you, a straight row, or a vertical stack. **Move active app to this display** puts the focused application on the selected monitor.
@@ -145,7 +145,7 @@ This starts the browser and tracking without creating virtual monitors. The conn
 
 Desktop clarity now defaults to Full HD per monitor. The earlier 1280×720 default enlarged a lower-resolution desktop onto the glasses’ 1920×1080 output, softening text. **Settings → View → Sharper text** is enabled by default and uses Catmull-Rom reconstruction for desktop text near native scale or when enlarged; video sampling is unchanged. This improves pixel reconstruction without changing head-tracking gain or adding temporal smoothing. Screens made very small or tilted far away still have fewer physical display pixels available for their contents. Existing 720p screen placements are retained when first switching to the Full HD default.
 
-**Anchor screens in space** is on by default. Turning it off makes the view follow your head. **Recenter here** sets the current orientation as forward. For Gen1/Gen2 glasses, including Pro 2, the app follows the supplied VITURE demo's roll/pitch/yaw convention: positive yaw looks left, pitch looks down, and roll tilts right. It builds a quaternion from those angles and uses quaternion composition for recentering and rendering.
+**Anchor screens in space** is on by default. Turning it off makes the view follow your head. **Recenter here** sets the current orientation as forward and level. Keep your head comfortably upright when using it. For Gen1/Gen2 glasses, including Pro 2, the app follows the supplied VITURE demo's roll/pitch/yaw convention: positive yaw looks left, pitch looks down, and roll tilts right. It builds a quaternion from those angles and uses quaternion composition for recentering and rendering.
 
 The Pro 2 packets measured on this machine do not give the same NWU rotation in their quaternion fields as in their Euler fields. Applying the documented NWU basis change directly to those quaternion fields produced the wrong movement axes. The app now follows the actual Gen1/Gen2 implementation in the SDK's `glasses-demo/main.cpp`, rather than that assumption. Regression tests include a recorded packet, the reference demo's camera basis, single-axis and combined movement, yaw wraparound, and rendered left/center/right monitor selection.
 
@@ -201,7 +201,7 @@ sudo udevadm control --reload-rules
 # Physically reconnect the glasses after reloading.
 ```
 
-The rule grants access to the active local user, not every user. Run the app as your normal user. Close other XR drivers that hold the device. A failed or stale tracking signal is shown in the UI; disconnect and reconnect tracking to retry. This release does not reconnect automatically after unplugging.
+The rule grants access to the active local user, not every user. Run the app as your normal user. Close other XR drivers that hold the device. If samples stop, the preview returns to level and tracking reconnects automatically after the old connection closes. Failed attempts back off from one second to a maximum of 30 seconds. **Reconnect** retries manually; **Disconnect tracking** cancels automatic retries. Recenter after recovery while wearing the glasses and looking forward. The app refuses to recenter from stale tracking data. Recovery from an interrupted live Pro 2 stream has been tested; physical unplug/replug and long-session drift still need qualification.
 
 ## Verification and architecture
 

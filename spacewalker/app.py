@@ -4,6 +4,7 @@ import shlex
 import shutil
 import sys
 import queue
+import time
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal, QSettings
 from PySide6.QtGui import QShortcut, QKeySequence, QDesktopServices
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
@@ -54,10 +55,10 @@ QMenu::separator { height: 1px; background: #34343b; margin: 5px 8px; }
 QLineEdit, QComboBox, QDoubleSpinBox { padding: 8px 10px; background: #111114; border: 1px solid #36363e; border-radius: 6px; selection-background-color: #51515f; }
 QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus { border-color: #9292a2; }
 QComboBox::drop-down { border: 0; width: 24px; }
-QComboBox::down-arrow { image: url(@ICONS@/chevron-down.svg); width: 12px; height: 12px; }
+QComboBox::down-arrow { image: url("@ICONS@/chevron-down.svg"); width: 12px; height: 12px; }
 QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width: 22px; border: 0; background: transparent; }
-QDoubleSpinBox::up-arrow { image: url(@ICONS@/chevron-up.svg); width: 10px; height: 10px; }
-QDoubleSpinBox::down-arrow { image: url(@ICONS@/chevron-down.svg); width: 10px; height: 10px; }
+QDoubleSpinBox::up-arrow { image: url("@ICONS@/chevron-up.svg"); width: 10px; height: 10px; }
+QDoubleSpinBox::down-arrow { image: url("@ICONS@/chevron-down.svg"); width: 10px; height: 10px; }
 QComboBox QAbstractItemView { background: #232328; color: #e6e6ec; selection-background-color: #3c3c46; border: 1px solid #454550; padding: 4px; }
 QTabWidget::pane { border: 0; }
 QTabBar::tab { padding: 11px 16px; color: #94949f; border-bottom: 2px solid #303036; font-size: 12px; }
@@ -125,6 +126,12 @@ class MainWindow(QMainWindow):
         self.closing = False
         self.tracking_busy = self.desktop_busy = False
         self.disconnect_requested = False
+        self.tracking_wanted = False
+        self.tracking_started_at = 0.
+        self.tracking_retry_at = 0.
+        self.tracking_retry_delay = 1.
+        self.tracking_error = None
+        self.reconnect_stereo = False
         self.sdk = args.sdk
         self.settings = QSettings('SpacewalkerLinux', 'Spacewalker')
         self.multiple_count = layout.count if layout.count>1 else 3
@@ -149,7 +156,8 @@ class MainWindow(QMainWindow):
         self.layout_snapshot = None
         self.setWindowTitle('Spacewalker')
         self.resize(1380, 850)
-        self.setStyleSheet(STYLE.replace('@ICONS@',Path(__file__).with_name('icons').as_uri()))
+        icons = str(Path(__file__).resolve().with_name('icons')).replace('\\','\\\\').replace('"','\\"')
+        self.setStyleSheet(STYLE.replace('@ICONS@',icons))
         central = QWidget()
         self.setCentralWidget(central)
         column = QVBoxLayout(central)
@@ -199,8 +207,13 @@ class MainWindow(QMainWindow):
         self.tracking_status.setObjectName('status')
         self.tracking_status.setMinimumWidth(80)
         tools.addWidget(self.tracking_status)
+        self.reconnect_button = button('Reconnect',self.reconnect_tracking)
+        self.reconnect_button.setObjectName('quiet')
+        self.reconnect_button.setToolTip('Restart the glasses tracking connection')
+        self.reconnect_button.hide()
+        tools.addWidget(self.reconnect_button)
         tools.addSpacing(8)
-        recenter_button = button('Recenter', lambda: self.viewer.recenter())
+        recenter_button = button('Recenter', self.recenter)
         recenter_button.setObjectName('quiet')
         tools.addWidget(recenter_button)
         self.settings_button = button('Settings', self.toggle_controls)
@@ -301,7 +314,7 @@ class MainWindow(QMainWindow):
         output_box.addWidget(self.display_combo)
         output_box.addWidget(note('Esc  Controls      Ctrl+Alt+R  Recenter'))
         side.addWidget(self.output_controls)
-        for key, fn in [('Ctrl+Alt+R', self.viewer.recenter), ('Ctrl+Alt+F', self.toggle_immersive),
+        for key, fn in [('Ctrl+Alt+R', self.recenter), ('Ctrl+Alt+F', self.toggle_immersive),
                         ('Ctrl+Alt+A', self.toggle_arrange),
                         ('Ctrl+Alt+Tab', lambda: self.desktop_command(type='cycle')),
                         ('Ctrl+Alt+Left', lambda: self.desktop_command(type='move', delta=-1)),
@@ -593,7 +606,9 @@ class MainWindow(QMainWindow):
             return
         for action in self.desktop.poll_actions():
             if action == 'recenter':
-                self.viewer.recenter()
+                self.recenter()
+            elif action == 'reconnect':
+                self.reconnect_tracking()
             elif action == 'fullscreen':
                 self.toggle_immersive()
             elif action == 'arrange':
@@ -615,6 +630,9 @@ class MainWindow(QMainWindow):
                               viewer_size=[self.viewer.width(),self.viewer.height()],
                               fullscreen=self.isFullScreen(),sharp_text=self.viewer.sharp_text,
                               tracking_connected=bool(self.tracker),fov=self.viewer.fov,
+                              tracking_status=self.tracking_status.text(),tracking_busy=self.tracking_busy,
+                              tracking_age_ms=(self.tracker.pose.age*1000 if self.tracker and self.tracker.pose.samples else None),
+                              tracking_samples=self.tracker.pose.samples if self.tracker else 0,
                               view_rotation=self.viewer.rotation.tolist(),world_up=list(self.layout.world_up),
                               anchored=self.viewer.anchored,stereo=self.viewer.stereo,
                               gl_error=self.viewer.gl_error,render_error=self.viewer.render_error)
@@ -747,7 +765,7 @@ class MainWindow(QMainWindow):
         anchor.toggled.connect(lambda value: setattr(self.viewer, 'anchored', value))
         box.addWidget(anchor)
         anchor.setToolTip('Keep displays fixed as you turn. Turn off to let them follow your head.')
-        box.addWidget(button('Recenter here', self.viewer.recenter))
+        box.addWidget(button('Recenter here', self.recenter))
         self.sharp_text = QCheckBox('Sharper text')
         self.sharp_text.setChecked(True)
         self.sharp_text.toggled.connect(lambda value: setattr(self.viewer, 'sharp_text', value))
@@ -1021,7 +1039,7 @@ class MainWindow(QMainWindow):
             except queue.Empty:
                 break
             if action == 'recenter':
-                self.viewer.recenter()
+                self.recenter()
             elif action == 'controls':
                 self.leave_immersive()
                 self.raise_()
@@ -1080,45 +1098,101 @@ class MainWindow(QMainWindow):
         if path:
             self.sdk_edit.setText(path)
 
-    def connect_tracking(self):
+    def recenter(self):
+        if self.tracking_wanted and (not self.tracker or self.tracker.pose.age >= .5):
+            self.problem('Tracking is reconnecting. Recenter when tracking is back on.')
+            return
+        self.viewer.recenter()
+
+    def connect_tracking(self, automatic=False):
+        if not automatic:
+            self.tracking_wanted = True
+            self.tracking_retry_delay = 1.
+            self.tracking_retry_at = 0.
         if self.tracker or self.tracking_busy or self.closing:
             return
         self.tracking_busy = True
         self.connect_button.setEnabled(False)
         self.tracking_status.setText('Connecting…')
+        self.tracking_started_at = time.monotonic()
         sdk = self.sdk_edit.text().strip() or None
+        stereo = self.reconnect_stereo
         def connect():
             tracker = VitureTracker(sdk, self.args.pid)
-            tracker.start()
+            try:
+                tracker.start()
+                if stereo:
+                    tracker.set_stereo(True)
+            except Exception:
+                tracker.close()
+                raise
             return tracker
         def ready(tracker):
             self.tracking_busy = False
             self.tracker = self.viewer.tracker = tracker
+            self.tracking_started_at = time.monotonic()
             self.mouse.setChecked(False)
+            if stereo:
+                self.sbs.setChecked(True)
             self.viewer.recenter()
+            if automatic:
+                self.message.setText('Tracking restored. Recenter while looking forward to align the workspace.')
             if self.disconnect_requested:
-                self.disconnect_tracking()
+                self.disconnect_tracking(reconnect=self.tracking_wanted)
         def failed(message):
             self.tracking_busy = False
             self.disconnect_requested = False
             self.connect_button.setEnabled(True)
-            self.tracking_status.setText('Mouse preview')
-            self.problem(message)
+            if self.tracking_wanted:
+                self.schedule_tracking_retry()
+            else:
+                self.tracking_status.setText('Mouse preview')
+                self.reconnect_button.hide()
+            if not automatic or message != self.tracking_error:
+                self.problem(message)
+            self.tracking_error = message
         self.run_job(connect, ready, failed)
 
-    def disconnect_tracking(self):
+    def schedule_tracking_retry(self):
+        self.tracking_retry_at = time.monotonic()+self.tracking_retry_delay
+        self.tracking_retry_delay = min(30.,self.tracking_retry_delay*2)
+        if self.tracking_wanted and not self.closing:
+            self.tracking_status.setText('Reconnecting…')
+            self.reconnect_button.show()
+
+    def reconnect_tracking(self):
+        self.tracking_wanted = True
+        self.tracking_retry_delay = 1.
+        self.tracking_retry_at = 0.
+        if self.tracker or self.tracking_busy:
+            self.disconnect_tracking(reconnect=True)
+        else:
+            self.connect_tracking()
+
+    def disconnect_tracking(self, reconnect=False):
+        if not reconnect:
+            self.tracking_wanted = False
+            self.reconnect_stereo = False
         if self.tracking_busy:
             self.disconnect_requested = True
             return
         self.disconnect_requested = False
         if self.tracker:
             tracker = self.tracker
+            original_mode = getattr(tracker,'original_display_mode',None)
+            if reconnect and original_mode is not None:
+                self.reconnect_stereo = True
             self.tracker = self.viewer.tracker = None
             self.tracking_busy = True
             self.connect_button.setEnabled(False)
             def finished(errors=None):
                 self.tracking_busy = False
+                self.disconnect_requested = False
                 self.connect_button.setEnabled(True)
+                if original_mode is not None:
+                    self.sbs.setChecked(original_mode == 0x32)
+                if self.tracking_wanted:
+                    self.schedule_tracking_retry()
                 if errors:
                     self.problem('; '.join(errors))
             def failed(message):
@@ -1128,7 +1202,9 @@ class MainWindow(QMainWindow):
         else:
             self.connect_button.setEnabled(True)
         self.mouse.setChecked(True)
-        self.tracking_status.setText('Mouse preview')
+        if not self.tracking_wanted:
+            self.reconnect_button.hide()
+            self.tracking_status.setText('Mouse preview')
 
     def set_hardware_stereo(self, enabled):
         if self.tracking_busy or self.closing:
@@ -1142,8 +1218,9 @@ class MainWindow(QMainWindow):
         def finished():
             self.tracking_busy = False
             if self.disconnect_requested:
-                self.disconnect_tracking()
+                self.disconnect_tracking(reconnect=self.tracking_wanted)
         def ready(_):
+            self.reconnect_stereo = enabled
             self.sbs.setChecked(enabled)
             self.message.setText('Display mode changed. Select the glasses output and enter glasses view.')
             QTimer.singleShot(2500, self.refresh_screens)
@@ -1211,16 +1288,30 @@ class MainWindow(QMainWindow):
         if self.tracker:
             age = self.tracker.pose.age
             if age < .5:
+                self.viewer.tracker = self.tracker
+                self.tracking_retry_delay = 1.
+                self.tracking_error = None
+                self.reconnect_button.hide()
                 self.tracking_status.setText('Tracking on' if self.isFullScreen() else 'Tracking · Preview')
                 self.tracking_status.setToolTip(f'VITURE connected · {age*1000:.0f} ms since latest sample. '
                                                'Use Glasses view for calibrated head movement through the lenses.')
             else:
-                self.tracking_status.setText('Tracking lost')
-                self.tracking_status.setToolTip('View held still. Reconnect tracking in Settings → View.')
+                # A stale pose is not a live camera. Use a level preview while
+                # reconnecting, so old roll cannot trap the UI at an angle.
+                self.viewer.tracker = None
+                self.viewer.yaw = self.viewer.pitch = 0.
+                self.tracking_status.setText('Tracking lost · retrying' if self.tracking_wanted else 'Tracking lost')
+                self.tracking_status.setToolTip('The glasses stopped sending orientation. The preview is level while tracking reconnects.')
+                self.reconnect_button.show()
+                if self.tracking_wanted and not self.tracking_busy and time.monotonic()-self.tracking_started_at > 1.5:
+                    self.disconnect_tracking(reconnect=True)
+        elif self.tracking_wanted and not self.tracking_busy and not self.closing:
+            if time.monotonic() >= self.tracking_retry_at:
+                self.connect_tracking(automatic=True)
 
     def render_problem(self, message):
         self.problem(message)
-        if self.desktop and self.viewer.scene == 0:
+        if self.viewer.render_error and self.desktop and self.viewer.scene == 0:
             # Detach after paintGL releases any borrowed mmap pixels.
             QTimer.singleShot(0,self.detach_failed_desktop)
 
